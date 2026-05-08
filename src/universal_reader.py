@@ -1,3 +1,7 @@
+import warnings
+# 🤫 屏蔽讨厌的 PyTorch MPS 警告，让终端保持清爽
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import os
 import re
 import jieba
@@ -10,31 +14,38 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 
 # ==========================================
+# 📍 动态项目根目录定位
+# ==========================================
+# 因为当前脚本在 src 文件夹下，.parent 就是 src，再 .parent 就是项目根目录
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# ==========================================
 # 👁️ 视觉模块初始化 (OCR)
 # ==========================================
 try:
     import easyocr
     print("✅ 检测到 EasyOCR，图像识别模块已就绪！")
     # 初始化 OCR 模型（放在全局，避免每次读文件都重新加载）
-    # M系列芯片的 Mac 会自动调用底层硬件加速
     ocr_reader = easyocr.Reader(['ch_sim', 'en'])
 except ImportError:
     ocr_reader = None
     print("⚠️ 未检测到 EasyOCR，图片文件将被跳过。如需处理图片，请执行 'pip install easyocr'")
 
 # ==========================================
-# 🚀 跨平台智能路径配置
+# 🚀 跨平台智能相对路径配置
 # ==========================================
 def get_dataset_path():
+    # 结合咱们标准化的项目结构，直接使用基于 BASE_DIR 的相对路径
+    dataset_path = BASE_DIR / "data" / "数据集1：历史真实文件数据"
+    
     current_os = platform.system()
     if current_os == "Darwin": 
-        dataset_path = Path("/Users/cyrus/Desktop/数学建模B题数据集/数据集1：历史真实文件数据")
-        print(f"🍎 已加载 Mac 路径。")
+        print(f"🍎 已加载 Mac 路径 (基于项目根目录: {dataset_path})")
     elif current_os == "Windows":
-        dataset_path = Path(r"C:\Users\wxcyr\Desktop\数学建模赛题和论文模板\B题\B题数据集\数据集1：历史真实文件数据")
-        print(f"🪟 已加载 Windows 路径。")
+        print(f"🪟 已加载 Windows 路径 (基于项目根目录: {dataset_path})")
     else:
-        dataset_path = Path("./数据集1：历史真实文件数据")
+        print(f"🐧 已加载其他系统路径: {dataset_path}")
+        
     return dataset_path
 
 folder_path = get_dataset_path()
@@ -73,7 +84,7 @@ def extract_text_from_file(file_path, ext):
                 content_str = " ".join(content)
                 text += f"工作表名:{sheet_name} 表头:{headers} 内容:{content_str}\n"
                 
-        # 🚀 新增：图像处理分支
+        # 🚀 图像处理分支
         elif ext in ['.jpg', '.jpeg', '.png']:
             if ocr_reader is not None:
                 # detail=0 表示只提取纯文本列表，丢弃坐标框等冗余数据
@@ -86,10 +97,10 @@ def extract_text_from_file(file_path, ext):
     return text
 
 def load_and_clean_all_documents(path):
-    print("🚀 老葛超级读取器 (V5.1 图像融合版) 启动中...\n")
+    print("\n🚀 老葛超级读取器 (V5.2 终极架构版) 启动中...\n")
     
     if not path.exists():
-        print(f"❌ 严重错误：找不到文件夹路径 {path}")
+        print(f"❌ 严重错误：找不到文件夹路径 {path}\n请确保 '数据集1：历史真实文件数据' 文件夹已放入项目的 'data' 目录下！")
         return [], [], []
 
     valid_documents = []
@@ -104,7 +115,7 @@ def load_and_clean_all_documents(path):
     }
     stop_words = base_stop_words | noise_words
     
-    # 🚀 新增：将图片格式加入白名单
+    # 图片格式在白名单中
     supported_exts = ['.txt', '.docx', '.pdf', '.xlsx', '.jpg', '.jpeg', '.png']
     
     all_files = [os.path.join(root, f) for root, dirs, files in os.walk(path) for f in files if os.path.splitext(f)[1].lower() in supported_exts]
@@ -163,9 +174,15 @@ def cluster_and_save(documents, file_names, file_types, num_clusters=6):
         '聚类标签': labels,
         '清洗后文本特征': documents
     })
-    output_path = "problem1_clustering_results.csv"
+    
+    # 📍 输出路径修改：确保 CSV 保存到项目根目录的 results 文件夹下
+    results_dir = BASE_DIR / "results"
+    results_dir.mkdir(exist_ok=True) # 如果没有 results 文件夹就自动建一个
+    output_path = results_dir / "problem1_clustering_results.csv"
+    
     df.to_csv(output_path, index=False, encoding='utf-8-sig')
-    print(f"🎉 结果已保存至同目录下的 {output_path}。第一问圆满闭环！")
+    print(f"🎉 结果已保存至: {output_path}")
+    print("第一问完美收官！可以准备开工问题二了！")
 
 if __name__ == "__main__":
     docs, names, types = load_and_clean_all_documents(folder_path)
