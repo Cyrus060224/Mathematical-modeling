@@ -87,8 +87,13 @@ def extract_text_from_file(file_path, ext):
         # 🚀 图像处理分支
         elif ext in ['.jpg', '.jpeg', '.png']:
             if ocr_reader is not None:
+                # 修复 Windows 下 OpenCV 无法读取中文路径的 Bug
+                # 绕过路径解析，直接用 Python 将图片读成二进制字节流
+                with open(file_path_str, 'rb') as img_file:
+                    img_bytes = img_file.read()
+                    
                 # detail=0 表示只提取纯文本列表，丢弃坐标框等冗余数据
-                result = ocr_reader.readtext(file_path_str, detail=0)
+                result = ocr_reader.readtext(img_bytes, detail=0)
                 text = " ".join(result)
                 
     except Exception as e:
