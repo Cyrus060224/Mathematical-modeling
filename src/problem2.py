@@ -1,413 +1,250 @@
 import os
 import re
+import warnings
 import numpy as np
 import pandas as pd
+import platform
+from pathlib import Path
+import jieba
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from scipy.stats import entropy
 
-
-
-
-
-# =====================================================
-# 1. 配置区域
-# =====================================================
-
-# 输入文件
-INPUT_FILE = "results/problem1_clustering_results.csv"
-
-# 输出文件
-OUTPUT_FILE = "results/problem2_result.csv"
-
-# 真实文本列
-TEXT_COLUMN = "清洗后文本特征"
-
-# 真实类别列
-LABEL_COLUMN = "聚类标签"
-
+# 🤫 屏蔽可能出现的第三方库警告，保持终端清爽
+warnings.filterwarnings("ignore")
 
 # =====================================================
-# 2. 规则关键词映射（基于你的KMeans结果）
+# 📍 动态项目根目录与路径配置
 # =====================================================
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-RULE_KEYWORDS = {
+# 问题一的训练数据
+TRAIN_FILE = BASE_DIR / "results" / "problem1_clustering_results.csv"
 
-    # 类别0：统计/数字/指标
-    "数字": 0,
-    "指数": 0,
-    "数据": 0,
-    "人数": 0,
-    "生产总值": 0,
-    "机构": 0,
-    "计算": 0,
+# 输出结果
+OUTPUT_FILE = BASE_DIR / "results" / "problem2_predictions.csv"
+METRICS_FILE = BASE_DIR / "results" / "problem2_metrics.txt"
 
-    # 类别1：工业/制造业
-    "制造业": 1,
-    "服务业": 1,
-    "工业": 1,
-    "加工": 1,
-    "制品业": 1,
-    "批发": 1,
-    "热力": 1,
-    "信息技术": 1,
-
-    # 类别2：居民消费/收入
-    "收入": 2,
-    "支出": 2,
-    "消费": 2,
-    "居民": 2,
-    "基金": 2,
-    "人均": 2,
-
-    # 类别3：行业/城市/指标
-    "城市": 3,
-    "行业": 3,
-    "指标": 3,
-    "规模": 3,
-    "登记注册": 3,
-
-    # 类别4：投资/区域经济
-    "投资": 4,
-    "面积": 4,
-    "全国": 4,
-    "亿元": 4,
-    "黑龙江": 4,
-    "辽宁": 4,
-    "上海": 4,
-
-    # 类别5：情感/消费倾向
-    "情感": 5,
-    "积极": 5,
-    "消极": 5,
-    "倾向": 5,
-    "消费品": 5,
-    "耐用": 5
-}
-
+# 数据源路径：数据集2是文件夹，数据集3是单独的 Excel 文件
+DATASET2_DIR = BASE_DIR / "data" / "数据集2：后续流入的半结构化记录数据"
+DATASET3_FILE = BASE_DIR / "data" / "数据集3：后续流入的匿名原始文件数据.xlsx"
 
 # =====================================================
-# 3. 工具函数
+# 🛠️ 轻量级文本读取与清洗
 # =====================================================
-
 def clean_text(text):
-
-    if pd.isna(text):
+    if pd.isna(text) or not str(text).strip():
         return ""
-
     text = str(text)
+    # 纯净去噪：只保留汉字和字母
+    text_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z]+', ' ', text)
+    words = jieba.lcut(text_clean.lower())
+    return " ".join([w for w in words if len(w) > 1])
 
-    # 去除特殊字符
-    text = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", " ", text)
+def load_new_datasets():
+    """读取数据集2(文件夹)和数据集3(文件)中的新流入数据"""
+    print("\n📂 正在扫描数据集2和数据集3的新流入数据...")
+    new_data = []
+    
+    # -----------------------------------------
+    # 1. 处理数据集 2 (遍历文件夹中的文件)
+    # -----------------------------------------
+    if DATASET2_DIR.exists():
+        for root, _, files in os.walk(DATASET2_DIR):
+            for file in files:
+                if file.startswith('~') or file.startswith('.'): continue
+                file_path = Path(root) / file
+                ext = file_path.suffix.lower()
+                
+                text_content = ""
+                try:
+                    if ext == '.txt':
+                        text_content = file_path.read_text(encoding='utf-8', errors='ignore')
+                    elif ext == '.csv':
+                        df = pd.read_csv(file_path, nrows=50)
+                        # 🚨 修复点：强制转换为 numpy 数组再压平，避开 Arrow 引擎报错
+                        text_content = " ".join(df.astype(str).to_numpy().flatten())
+                    elif ext == '.xlsx':
+                        df = pd.read_excel(file_path, nrows=50)
+                        # 🚨 修复点：同上
+                        text_content = " ".join(df.astype(str).to_numpy().flatten())
+                except Exception:
+                    pass
+                
+                if len(text_content.strip()) > 5:
+                    new_data.append({
+                        '文件名': file,
+                        '数据来源': '数据集2',
+                        '原始文本': text_content
+                    })
+    else:
+        print(f"⚠️ 警告: 未找到文件夹 {DATASET2_DIR}")
 
-    # 去除多余空格
-    text = re.sub(r"\s+", " ", text)
+    # -----------------------------------------
+    # 2. 处理数据集 3 (多重引擎容错机制)
+    # -----------------------------------------
+    if DATASET3_FILE.exists():
+        print(f"📄 发现数据集3文件，正在尝试破解读取...")
+        df3 = None
+        try:
+            # 尝试方案 A：强制使用 openpyxl 引擎
+            df3 = pd.read_excel(DATASET3_FILE, engine='openpyxl')
+            print("✅ 成功以 Excel 格式读取数据集3！")
+        except Exception as e1:
+            print(f"⚠️ Excel引擎解析失败，启动备用 CSV 方案...")
+            try:
+                # 尝试方案 B：UTF-8 编码 CSV
+                df3 = pd.read_csv(DATASET3_FILE, encoding='utf-8-sig')
+                print("✅ 成功以 UTF-8 CSV 格式读取数据集3！")
+            except Exception as e2:
+                try:
+                    # 尝试方案 C：GBK 编码 CSV
+                    df3 = pd.read_csv(DATASET3_FILE, encoding='gbk')
+                    print("✅ 成功以 GBK CSV 格式读取数据集3！")
+                except Exception as e3:
+                    print(f"❌ 数据集3读取彻底失败。")
+        
+        # 如果读取成功，开始拼装行文本
+        if df3 is not None:
+            for index, row in df3.iterrows():
+                # 🚨 致命报错修复点：对于 Series 行对象，直接转成 Python List
+                text_content = " ".join(row.astype(str).tolist())
+                text_content = text_content.replace('nan', ' ').strip()
+                
+                if len(text_content) > 5:
+                    new_data.append({
+                        '文件名': f"匿名文件_行号_{index+1}", 
+                        '数据来源': '数据集3',
+                        '原始文本': text_content
+                    })
+    else:
+        print(f"⚠️ 警告: 未找到文件 {DATASET3_FILE}")
 
-    return text.strip()
-
-
-def rule_based_classification(text):
-
-    for keyword, category in RULE_KEYWORDS.items():
-
-        if keyword in text:
-            return category
-
-    return None
-
-
-def is_unknown(label):
-
-    if pd.isna(label):
-        return True
-
-    if str(label).strip() in ["", "未知", "未分类", "None", "nan"]:
-        return True
-
-    return False
-
-
-# =====================================================
-# 4. 读取数据
-# =====================================================
-
-print("=" * 60)
-print("🚀 问题二分类系统启动")
-print("=" * 60)
-
-if not os.path.exists(INPUT_FILE):
-    raise FileNotFoundError(f"❌ 找不到输入文件: {INPUT_FILE}")
-
-print(f"\n📂 正在读取文件: {INPUT_FILE}")
-
-df = pd.read_csv(INPUT_FILE)
-
-print(f"✅ 数据读取成功")
-print(f"📊 总数据量: {len(df)}")
-
-print("\n📋 CSV列名:")
-print(df.columns)
-
-
-# =====================================================
-# 5. 文本预处理
-# =====================================================
-
-print("\n🧹 正在清洗文本...")
-
-df[TEXT_COLUMN] = df[TEXT_COLUMN].astype(str)
-
-df["clean_text"] = df[TEXT_COLUMN].apply(clean_text)
-
-
-# =====================================================
-# 6. 分离已分类和未分类数据
-# =====================================================
-
-classified_df = df[~df[LABEL_COLUMN].apply(is_unknown)].copy()
-
-unclassified_df = df[df[LABEL_COLUMN].apply(is_unknown)].copy()
-
-print(f"\n✅ 已分类数据: {len(classified_df)}")
-
-print(f"⚠️ 未分类数据: {len(unclassified_df)}")
-
-
-# =====================================================
-# 7. 第一阶段：规则分类
-# =====================================================
-
-print("\n🧠 第一阶段：规则分类处理中...")
-
-rule_predictions = []
-
-for text in unclassified_df["clean_text"]:
-
-    pred = rule_based_classification(text)
-
-    rule_predictions.append(pred)
-
-unclassified_df["rule_prediction"] = rule_predictions
-
-rule_success_df = unclassified_df[
-    unclassified_df["rule_prediction"].notna()
-].copy()
-
-rule_failed_df = unclassified_df[
-    unclassified_df["rule_prediction"].isna()
-].copy()
-
-print(f"✅ 规则分类成功: {len(rule_success_df)}")
-
-print(f"⚠️ 规则分类失败: {len(rule_failed_df)}")
-
+    # -----------------------------------------
+    # 3. 统一清洗返回
+    # -----------------------------------------
+    df_new = pd.DataFrame(new_data)
+    if not df_new.empty:
+        print(f"✅ 成功加载 {len(df_new)} 条新数据！正在清洗特征词...")
+        df_new['清洗后文本特征'] = df_new['原始文本'].apply(clean_text)
+        # 过滤掉清洗后变为空的数据
+        df_new = df_new[df_new['清洗后文本特征'].str.len() > 0].copy()
+    else:
+        print("❌ 未提取到任何有效数据，请检查 data 文件夹。")
+        
+    return df_new
 
 # =====================================================
-# 8. 第二阶段：机器学习分类
+# 🧠 核心：训练基座模型与量化评价指标
 # =====================================================
+def run_classification_pipeline():
+    print("=" * 60)
+    print("🚀 问题二：多源异构数据迁移分类与评价系统启动")
+    print("=" * 60)
 
-if len(rule_failed_df) > 0:
+    # 1. 加载第一问的“黄金标准”作为训练集
+    if not TRAIN_FILE.exists():
+        print(f"❌ 严重错误：找不到第一问结果 {TRAIN_FILE}")
+        return
+    
+    print("\n📚 第一阶段：加载问题一主题分类体系...")
+    df_train = pd.read_csv(TRAIN_FILE)
+    X_train_text = df_train['清洗后文本特征'].fillna('')
+    y_train = df_train['聚类标签']
+    
+    # 使用统一的 TF-IDF 向量空间 (与第一问对齐)
+    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
+    X_train = vectorizer.fit_transform(X_train_text)
+    
+    # 训练逻辑回归分类器
+    model = LogisticRegression(max_iter=1000, class_weight='balanced', random_state=42)
+    model.fit(X_train, y_train)
+    print("✅ 分类器训练完毕 (基于第一问历史体系)")
 
-    print("\n🤖 第二阶段：TF-IDF + LogisticRegression")
-
-    X_train = classified_df["clean_text"]
-
-    y_train = classified_df[LABEL_COLUMN]
-
-    vectorizer = TfidfVectorizer(
-        max_features=5000,
-        ngram_range=(1, 2)
-    )
-
-    X_train_vec = vectorizer.fit_transform(X_train)
-
-    model = LogisticRegression(
-        max_iter=3000,
-        random_state=42
-    )
-
-    model.fit(X_train_vec, y_train)
-
-    print("✅ 模型训练完成")
-
-    X_test_vec = vectorizer.transform(
-        rule_failed_df["clean_text"]
-    )
-
-    ml_predictions = model.predict(X_test_vec)
-
-    probabilities = model.predict_proba(X_test_vec)
-
-    confidence_scores = np.max(probabilities, axis=1)
-
-    rule_failed_df["ml_prediction"] = ml_predictions
-
-    rule_failed_df["confidence"] = confidence_scores
-
-    print("✅ 机器学习分类完成")
-
-
-# =====================================================
-# 9. 第三阶段：文本相似度修正
-# =====================================================
-
-if len(rule_failed_df) > 0:
-
-    print("\n🔍 第三阶段：文本相似度修正")
-
-    classified_texts = classified_df["clean_text"].tolist()
-
-    classified_labels = classified_df[LABEL_COLUMN].tolist()
-
-    all_texts = classified_texts + rule_failed_df["clean_text"].tolist()
-
-    sim_vectorizer = TfidfVectorizer(max_features=3000)
-
-    sim_matrix = sim_vectorizer.fit_transform(all_texts)
-
-    train_matrix = sim_matrix[:len(classified_texts)]
-
-    test_matrix = sim_matrix[len(classified_texts):]
-
-    similarity = cosine_similarity(test_matrix, train_matrix)
-
-    similarity_predictions = []
-
-    for row in similarity:
-
-        idx = np.argmax(row)
-
-        similarity_predictions.append(classified_labels[idx])
-
-    rule_failed_df["similarity_prediction"] = similarity_predictions
-
-    final_predictions = []
-
-    for _, row in rule_failed_df.iterrows():
-
-        if row["confidence"] >= 0.7:
-            final_predictions.append(row["ml_prediction"])
+    # 2. 加载并转换新流入数据
+    df_new = load_new_datasets()
+    if df_new.empty:
+        print("❌ 分类中止：新数据集为空。")
+        return
+        
+    print("\n🔮 第二阶段：处理新数据并计算概率分布...")
+    X_new = vectorizer.transform(df_new['清洗后文本特征'])
+    
+    # 获取预测概率矩阵
+    probs = model.predict_proba(X_new)
+    
+    # 3. 核心机制：计算评价指标与异常捕捉
+    print("\n📐 第三阶段：计算综合量化评价指标与异常拦截...")
+    
+    predictions = []
+    confidences = []
+    ambiguity_scores = []
+    entropies = []
+    status_flags = []
+    
+    for i, prob_dist in enumerate(probs):
+        sorted_indices = np.argsort(prob_dist)[::-1]
+        top1_class = sorted_indices[0]
+        top2_class = sorted_indices[1]
+        
+        top1_prob = prob_dist[top1_class]
+        top2_prob = prob_dist[top2_class]
+        
+        confidences.append(top1_prob)
+        margin = top1_prob - top2_prob
+        ambiguity_scores.append(margin)
+        ent = entropy(prob_dist, base=2)
+        entropies.append(ent)
+        
+        # 异常拦截规则
+        if top1_prob < 0.40:
+            status_flags.append("无法明确归类 (低置信度)")
+            predictions.append(-1)
+        elif margin < 0.15:
+            status_flags.append(f"多类别特征 (倾向 {model.classes_[top1_class]} 和 {model.classes_[top2_class]})")
+            predictions.append(-1) 
         else:
-            final_predictions.append(row["similarity_prediction"])
+            status_flags.append("自动归类成功")
+            predictions.append(model.classes_[top1_class])
 
-    rule_failed_df["final_prediction"] = final_predictions
+    # 4. 组装并保存结果
+    df_new['预测类别'] = predictions
+    df_new['最大置信度'] = confidences
+    df_new['类别混淆度'] = ambiguity_scores
+    df_new['信息熵'] = entropies
+    df_new['处理状态'] = status_flags
+    
+    df_new.drop(columns=['原始文本', '清洗后文本特征']).to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
+    print(f"\n💾 预测结果已保存至: {OUTPUT_FILE}")
+    
+    # 5. 输出宏观评价报告
+    success_rate = (df_new['预测类别'] != -1).mean() * 100
+    avg_entropy = np.mean(entropies)
+    
+    report = f"""
+==================================================
+📊 问题二：分类系统综合量化评价报告
+==================================================
+【1. 迁移适用性评价】
+- 新数据总测试量: {len(df_new)} 份
+- 模型有效识别率: {success_rate:.2f}%
+- 需人工复核率: {100 - success_rate:.2f}% 
 
-    print("✅ 相似度修正完成")
+【2. 分类合理性与可解释性评价】
+- 全局平均信息熵 (H): {avg_entropy:.4f} (越低代表模型判定越果断)
+- 平均预测置信度: {np.mean(confidences):.4f}
 
+【3. 异常数据处理说明】
+模型共拦截了 {sum(df_new['预测类别'] == -1)} 份异常数据，已统一标记为 -1 (待复核)。
+这些数据将被移交至问题三的人工/规则复核流程。
+==================================================
+"""
+    print(report)
+    with open(METRICS_FILE, 'w', encoding='utf-8') as f:
+        f.write(report)
+    print(f"📝 量化评价报告已保存至: {METRICS_FILE}")
 
-# =====================================================
-# 10. 合并结果
-# =====================================================
-
-print("\n📦 正在合并结果...")
-
-if len(rule_success_df) > 0:
-    rule_success_df[LABEL_COLUMN] = rule_success_df["rule_prediction"]
-
-if len(rule_failed_df) > 0:
-    rule_failed_df[LABEL_COLUMN] = rule_failed_df["final_prediction"]
-
-final_df = pd.concat([
-    classified_df,
-    rule_success_df,
-    rule_failed_df
-], ignore_index=True)
-
-print(f"✅ 最终数据量: {len(final_df)}")
-
-
-# =====================================================
-# 11. 分类统计
-# =====================================================
-
-print("\n📈 分类统计")
-
-print("=" * 60)
-
-counts = final_df[LABEL_COLUMN].value_counts()
-
-for category, count in counts.items():
-
-    print(f"类别 {category} : {count}")
-
-print("=" * 60)
-
-
-# =====================================================
-# 12. 保存结果
-# =====================================================
-
-drop_columns = [
-    "clean_text",
-    "rule_prediction",
-    "ml_prediction",
-    "confidence",
-    "similarity_prediction",
-    "final_prediction"
-]
-
-existing_columns = [
-    col for col in drop_columns
-    if col in final_df.columns
-]
-
-final_df = final_df.drop(columns=existing_columns)
-
-final_df.to_csv(
-    OUTPUT_FILE,
-    index=False,
-    encoding="utf-8-sig"
-)
-
-print(f"\n✅ 结果保存成功: {OUTPUT_FILE}")
-
-
-# =====================================================
-# 13. 模型评估
-# =====================================================
-
-try:
-
-    print("\n🧪 模型评估中...")
-
-    X = classified_df["clean_text"]
-
-    y = classified_df[LABEL_COLUMN]
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
-    )
-
-    eval_vectorizer = TfidfVectorizer(max_features=5000)
-
-    X_train_vec = eval_vectorizer.fit_transform(X_train)
-
-    X_test_vec = eval_vectorizer.transform(X_test)
-
-    eval_model = LogisticRegression(max_iter=3000)
-
-    eval_model.fit(X_train_vec, y_train)
-
-    y_pred = eval_model.predict(X_test_vec)
-
-    print("\n📋 分类报告")
-
-    print(classification_report(y_test, y_pred))
-
-except Exception as e:
-
-    print(f"\n⚠️ 模型评估失败: {e}")
-
-
-# =====================================================
-# 14. 完成
-# =====================================================
-
-print("\n🎉 问题二处理完成！")
-print("=" * 60)
+if __name__ == "__main__":
+    run_classification_pipeline()
