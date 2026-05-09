@@ -10,14 +10,14 @@ data/
 # 2. 运行结果与中间产物
 # ==========================================
 # 先忽略整个 results 文件夹
-results/
+results/*
 
 # 🚀 但我们要给“全村的希望”开个绿灯：
 # 使用感叹号 ! 来排除特定文件的忽略规则
 !results/problem1_clustering_results.csv
 !results/problem2_metrics.txt
-!problem2_predictions.csv
-!problem3_final_decison.csv
+!results/problem2_predictions.csv
+!results/problem3_final_decision.csv
 
 # 其余格式依然保持忽略，防止误传
 *.xlsx
