@@ -17,6 +17,7 @@ results/
 !results/problem1_clustering_results.csv
 !results/problem2_metrics.txt
 !problem2_predictions.csv
+!problem3_final_decison.csv
 
 # 其余格式依然保持忽略，防止误传
 *.xlsx
