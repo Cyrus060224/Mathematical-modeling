@@ -36,7 +36,7 @@ except ImportError:
 # ==========================================
 def get_dataset_path():
     # 结合咱们标准化的项目结构，直接使用基于 BASE_DIR 的相对路径
-    dataset_path = BASE_DIR / "data" / "数据集1：历史真实文件数据"
+    dataset_path = BASE_DIR / "data" / "1"
     
     current_os = platform.system()
     if current_os == "Darwin": 
