@@ -1,5 +1,5 @@
 import warnings
-# 🤫 屏蔽讨厌的 PyTorch MPS 警告，让终端保持清爽
+# 屏蔽 PyTorch MPS 等底层警告，保持终端输出整洁
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import os
@@ -14,44 +14,44 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 
 # ==========================================
-# 📍 动态项目根目录定位
+# 项目根目录定位
 # ==========================================
-# 因为当前脚本在 src 文件夹下，.parent 就是 src，再 .parent 就是项目根目录
+# 基于当前脚本所在路径，动态获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ==========================================
-# 👁️ 视觉模块初始化 (OCR)
+# 图像光学字符识别 (OCR) 模块初始化
 # ==========================================
 try:
     import easyocr
-    print("✅ 检测到 EasyOCR，图像识别模块已就绪！")
-    # 初始化 OCR 模型（放在全局，避免每次读文件都重新加载）
+    print("[INFO] 已检测到 EasyOCR，图像识别模块初始化完成。")
+    # 全局初始化 OCR 模型，避免重复加载开销
     ocr_reader = easyocr.Reader(['ch_sim', 'en'])
 except ImportError:
     ocr_reader = None
-    print("⚠️ 未检测到 EasyOCR，图片文件将被跳过。如需处理图片，请执行 'pip install easyocr'")
+    print("[WARNING] 未检测到 EasyOCR 库，将跳过图像文件处理。如需启用该功能，请执行 'pip install easyocr'")
 
 # ==========================================
-# 🚀 跨平台智能相对路径配置
+# 跨平台相对路径配置
 # ==========================================
 def get_dataset_path():
-    # 结合咱们标准化的项目结构，直接使用基于 BASE_DIR 的相对路径
-    dataset_path = BASE_DIR / "data" / "1"
+    # 基于项目根目录构建数据集相对路径
+    dataset_path = BASE_DIR / "data" / "数据集1：历史真实文件数据"
     
     current_os = platform.system()
     if current_os == "Darwin": 
-        print(f"🍎 已加载 Mac 路径 (基于项目根目录: {dataset_path})")
+        print(f"[INFO] 操作系统环境: macOS，数据集路径映射为: {dataset_path}")
     elif current_os == "Windows":
-        print(f"🪟 已加载 Windows 路径 (基于项目根目录: {dataset_path})")
+        print(f"[INFO] 操作系统环境: Windows，数据集路径映射为: {dataset_path}")
     else:
-        print(f"🐧 已加载其他系统路径: {dataset_path}")
+        print(f"[INFO] 操作系统环境: 其他系统，数据集路径映射为: {dataset_path}")
         
     return dataset_path
 
 folder_path = get_dataset_path()
 
 # ==========================================
-# 🛠️ 核心功能模块 (已加入图片解析)
+# 数据提取与特征处理核心模块
 # ==========================================
 def extract_text_from_file(file_path, ext):
     text = ""
@@ -84,15 +84,15 @@ def extract_text_from_file(file_path, ext):
                 content_str = " ".join(content)
                 text += f"工作表名:{sheet_name} 表头:{headers} 内容:{content_str}\n"
                 
-        # 🚀 图像处理分支
+        # 图像文件处理分支
         elif ext in ['.jpg', '.jpeg', '.png']:
             if ocr_reader is not None:
-                # 修复 Windows 下 OpenCV 无法读取中文路径的 Bug
-                # 绕过路径解析，直接用 Python 将图片读成二进制字节流
+                # 规避特定系统下 OpenCV 读取中文路径的兼容性问题
+                # 采用二进制流方式读取图像文件数据
                 with open(file_path_str, 'rb') as img_file:
                     img_bytes = img_file.read()
                     
-                # detail=0 表示只提取纯文本列表，丢弃坐标框等冗余数据
+                # detail=0 参数用于仅提取纯文本内容，忽略边界框等空间坐标数据
                 result = ocr_reader.readtext(img_bytes, detail=0)
                 text = " ".join(result)
                 
@@ -102,10 +102,10 @@ def extract_text_from_file(file_path, ext):
     return text
 
 def load_and_clean_all_documents(path):
-    print("\n🚀 老葛超级读取器 (V5.2 终极架构版) 启动中...\n")
+    print("\n[INFO] 开始执行数据集加载与清洗模块...\n")
     
     if not path.exists():
-        print(f"❌ 严重错误：找不到文件夹路径 {path}\n请确保 '数据集1：历史真实文件数据' 文件夹已放入项目的 'data' 目录下！")
+        print(f"[ERROR] 路径不存在: {path}\n请检查数据集目录结构是否完整。")
         return [], [], []
 
     valid_documents = []
@@ -120,20 +120,20 @@ def load_and_clean_all_documents(path):
     }
     stop_words = base_stop_words | noise_words
     
-    # 图片格式在白名单中
+    # 支持解析的文件扩展名列表
     supported_exts = ['.txt', '.docx', '.pdf', '.xlsx', '.jpg', '.jpeg', '.png']
     
     all_files = [os.path.join(root, f) for root, dirs, files in os.walk(path) for f in files if os.path.splitext(f)[1].lower() in supported_exts]
     total_files = len(all_files)
-    print(f"总计发现 {total_files} 个支持解析的文件（含图片）。开始硬核吞吐...\n")
+    print(f"[INFO] 共扫描到 {total_files} 个受支持的文件，开始批量提取与清洗...\n")
 
     for index, file_path in enumerate(all_files):
         ext = os.path.splitext(file_path)[1].lower()
         file_name = os.path.basename(file_path)
         
-        # 频率调低：因为图片识别较慢，每处理 10 个文件就报一次平安
+        # 设置进度输出频率，控制终端打印开销
         if (index + 1) % 10 == 0:
-            print(f"[{index+1}/{total_files}] 正在处理中，当前文件: {file_name}")
+            print(f"[PROCESS] 进度: {index+1}/{total_files} | 当前解析文件: {file_name}")
 
         raw_text = extract_text_from_file(file_path, ext)
         
@@ -150,11 +150,11 @@ def load_and_clean_all_documents(path):
                 file_names.append(file_name)
                 file_types.append(ext)
                         
-    print(f"\n✅ 兵马集结完毕！成功清洗了 {len(valid_documents)} 个有效文件！")
+    print(f"\n[INFO] 数据清洗完成，共提取 {len(valid_documents)} 个有效文本特征数据。")
     return valid_documents, file_names, file_types
 
 def cluster_and_save(documents, file_names, file_types, num_clusters=6):
-    print(f"\n🧠 开始 TF-IDF 特征提取与 K-Means 聚类 (K={num_clusters})...")
+    print(f"\n[INFO] 启动文本特征提取 (TF-IDF) 与 K-Means 聚类分析 (K={num_clusters})...")
     
     vectorizer = TfidfVectorizer(max_df=0.85, min_df=15)
     tfidf_matrix = vectorizer.fit_transform(documents)
@@ -162,17 +162,17 @@ def cluster_and_save(documents, file_names, file_types, num_clusters=6):
     kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
     labels = kmeans.fit_predict(tfidf_matrix)
     
-    print("\n🏆 最终聚类主题与核心词：")
+    print("\n[RESULT] 聚类模型收敛，各簇核心特征词如下：")
     order_centroids = kmeans.cluster_centers_.argsort()[:, ::-1]
     terms = vectorizer.get_feature_names_out()
     
     for i in range(num_clusters):
-        print(f"【类别 {i}】的核心词汇:")
+        print(f"Cluster {i} 核心特征词:")
         top_words = [terms[ind] for ind in order_centroids[i, :12]]
         print(" | ".join(top_words))
         print("-" * 40)
         
-    print("\n💾 正在将分类结果落盘保存为 CSV 文件...")
+    print("\n[INFO] 正在将聚类结果序列化并导出至 CSV 文件...")
     df = pd.DataFrame({
         '文件名': file_names,
         '文件格式': file_types,
@@ -180,14 +180,13 @@ def cluster_and_save(documents, file_names, file_types, num_clusters=6):
         '清洗后文本特征': documents
     })
     
-    # 📍 输出路径修改：确保 CSV 保存到项目根目录的 results 文件夹下
+    # 配置输出路径：结果将保存于项目根目录的 results 目录下
     results_dir = BASE_DIR / "results"
-    results_dir.mkdir(exist_ok=True) # 如果没有 results 文件夹就自动建一个
+    results_dir.mkdir(exist_ok=True) # 确保输出目录存在
     output_path = results_dir / "problem1_clustering_results.csv"
     
     df.to_csv(output_path, index=False, encoding='utf-8-sig')
-    print(f"🎉 结果已保存至: {output_path}")
-    print("第一问完美收官！可以准备开工问题二了！")
+    print(f"[SUCCESS] 聚类结果已成功保存至: {output_path}")
 
 if __name__ == "__main__":
     docs, names, types = load_and_clean_all_documents(folder_path)

@@ -12,44 +12,44 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from scipy.stats import entropy
 
-# 🤫 屏蔽可能出现的第三方库警告，保持终端清爽
+# 屏蔽第三方库的底层警告，保持日志输出整洁
 warnings.filterwarnings("ignore")
 
 # =====================================================
-# 📍 动态项目根目录与路径配置
+# 项目根目录与绝对路径配置
 # =====================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 问题一的训练数据
+# 问题一聚类结果（先验训练集）
 TRAIN_FILE = BASE_DIR / "results" / "problem1_clustering_results.csv"
 
-# 输出结果
+# 预测结果与量化评价指标输出路径
 OUTPUT_FILE = BASE_DIR / "results" / "problem2_predictions.csv"
 METRICS_FILE = BASE_DIR / "results" / "problem2_metrics.txt"
 
-# 数据源路径：数据集2是文件夹，数据集3是单独的 Excel 文件
+# 新流入数据源路径设定
 DATASET2_DIR = BASE_DIR / "data" / "数据集2：后续流入的半结构化记录数据"
 DATASET3_FILE = BASE_DIR / "data" / "数据集3：后续流入的匿名原始文件数据.xlsx"
 
 # =====================================================
-# 🛠️ 轻量级文本读取与清洗
+# 文本数据的加载与预处理模块
 # =====================================================
 def clean_text(text):
     if pd.isna(text) or not str(text).strip():
         return ""
     text = str(text)
-    # 纯净去噪：只保留汉字和字母
+    # 数据降噪：仅保留中文字符与英文字母
     text_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z]+', ' ', text)
     words = jieba.lcut(text_clean.lower())
     return " ".join([w for w in words if len(w) > 1])
 
 def load_new_datasets():
-    """读取数据集2(文件夹)和数据集3(文件)中的新流入数据"""
-    print("\n📂 正在扫描数据集2和数据集3的新流入数据...")
+    """加载并解析数据集2与数据集3的新流入样本"""
+    print("\n[INFO] 开始扫描数据集2与数据集3中的新流入文件...")
     new_data = []
     
     # -----------------------------------------
-    # 1. 处理数据集 2 (遍历文件夹中的文件)
+    # 1. 提取数据集 2 (遍历半结构化目录)
     # -----------------------------------------
     if DATASET2_DIR.exists():
         for root, _, files in os.walk(DATASET2_DIR):
@@ -64,11 +64,10 @@ def load_new_datasets():
                         text_content = file_path.read_text(encoding='utf-8', errors='ignore')
                     elif ext == '.csv':
                         df = pd.read_csv(file_path, nrows=50)
-                        # 🚨 修复点：强制转换为 numpy 数组再压平，避开 Arrow 引擎报错
+                        # 规避底层引擎兼容性问题，将 DataFrame 转换为 NumPy 数组并展平
                         text_content = " ".join(df.astype(str).to_numpy().flatten())
                     elif ext == '.xlsx':
                         df = pd.read_excel(file_path, nrows=50)
-                        # 🚨 修复点：同上
                         text_content = " ".join(df.astype(str).to_numpy().flatten())
                 except Exception:
                     pass
@@ -80,36 +79,36 @@ def load_new_datasets():
                         '原始文本': text_content
                     })
     else:
-        print(f"⚠️ 警告: 未找到文件夹 {DATASET2_DIR}")
+        print(f"[WARNING] 路径不存在: {DATASET2_DIR}")
 
     # -----------------------------------------
-    # 2. 处理数据集 3 (多重引擎容错机制)
+    # 2. 提取数据集 3 (多引擎容错读取机制)
     # -----------------------------------------
     if DATASET3_FILE.exists():
-        print(f"📄 发现数据集3文件，正在尝试破解读取...")
+        print(f"[INFO] 检测到数据集3，启动多引擎解析机制...")
         df3 = None
         try:
-            # 尝试方案 A：强制使用 openpyxl 引擎
+            # 优先级 1：调用 openpyxl 引擎解析标准 Excel 格式
             df3 = pd.read_excel(DATASET3_FILE, engine='openpyxl')
-            print("✅ 成功以 Excel 格式读取数据集3！")
+            print("[INFO] 成功以 Excel 格式加载数据集3。")
         except Exception as e1:
-            print(f"⚠️ Excel引擎解析失败，启动备用 CSV 方案...")
+            print(f"[WARNING] Excel引擎解析异常，启动备用 CSV 解析方案...")
             try:
-                # 尝试方案 B：UTF-8 编码 CSV
+                # 优先级 2：采用 UTF-8 编码读取伪装的 CSV 文件
                 df3 = pd.read_csv(DATASET3_FILE, encoding='utf-8-sig')
-                print("✅ 成功以 UTF-8 CSV 格式读取数据集3！")
+                print("[INFO] 成功以 UTF-8 CSV 格式加载数据集3。")
             except Exception as e2:
                 try:
-                    # 尝试方案 C：GBK 编码 CSV
+                    # 优先级 3：回退至 GBK 编码读取
                     df3 = pd.read_csv(DATASET3_FILE, encoding='gbk')
-                    print("✅ 成功以 GBK CSV 格式读取数据集3！")
+                    print("[INFO] 成功以 GBK CSV 格式加载数据集3。")
                 except Exception as e3:
-                    print(f"❌ 数据集3读取彻底失败。")
+                    print(f"[ERROR] 数据集3解析失败，请检查文件完整性。")
         
-        # 如果读取成功，开始拼装行文本
+        # 将表格行数据序列化为文本特征
         if df3 is not None:
             for index, row in df3.iterrows():
-                # 🚨 致命报错修复点：对于 Series 行对象，直接转成 Python List
+                # 对于 Series 结构，转换为原生 List 进行特征拼接
                 text_content = " ".join(row.astype(str).tolist())
                 text_content = text_content.replace('nan', ' ').strip()
                 
@@ -120,63 +119,63 @@ def load_new_datasets():
                         '原始文本': text_content
                     })
     else:
-        print(f"⚠️ 警告: 未找到文件 {DATASET3_FILE}")
+        print(f"[WARNING] 文件不存在: {DATASET3_FILE}")
 
     # -----------------------------------------
-    # 3. 统一清洗返回
+    # 3. 统一执行文本清洗与特征过滤
     # -----------------------------------------
     df_new = pd.DataFrame(new_data)
     if not df_new.empty:
-        print(f"✅ 成功加载 {len(df_new)} 条新数据！正在清洗特征词...")
+        print(f"[SUCCESS] 成功提取 {len(df_new)} 条有效样本，启动特征空间映射...")
         df_new['清洗后文本特征'] = df_new['原始文本'].apply(clean_text)
-        # 过滤掉清洗后变为空的数据
+        # 剔除清洗后产生的空特征数据
         df_new = df_new[df_new['清洗后文本特征'].str.len() > 0].copy()
     else:
-        print("❌ 未提取到任何有效数据，请检查 data 文件夹。")
+        print("[ERROR] 未提取到有效文本数据，请检查输入源。")
         
     return df_new
 
 # =====================================================
-# 🧠 核心：训练基座模型与量化评价指标
+# 分类模型训练与综合量化评价模块
 # =====================================================
 def run_classification_pipeline():
     print("=" * 60)
-    print("🚀 问题二：多源异构数据迁移分类与评价系统启动")
+    print("[INFO] 启动问题二：多源异构数据迁移分类与综合评价系统")
     print("=" * 60)
 
-    # 1. 加载第一问的“黄金标准”作为训练集
+    # 1. 载入问题一的聚类结果作为监督学习训练集
     if not TRAIN_FILE.exists():
-        print(f"❌ 严重错误：找不到第一问结果 {TRAIN_FILE}")
+        print(f"[ERROR] 缺失前置依赖：未找到训练集文件 {TRAIN_FILE}")
         return
     
-    print("\n📚 第一阶段：加载问题一主题分类体系...")
+    print("\n[PROCESS] 阶段一：加载历史主题分类体系及训练样本...")
     df_train = pd.read_csv(TRAIN_FILE)
     X_train_text = df_train['清洗后文本特征'].fillna('')
     y_train = df_train['聚类标签']
     
-    # 使用统一的 TF-IDF 向量空间 (与第一问对齐)
+    # 统一特征向量空间参数，确保跨数据集维度一致
     vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
     X_train = vectorizer.fit_transform(X_train_text)
     
-    # 训练逻辑回归分类器
+    # 训练引入类权重平衡的逻辑回归模型
     model = LogisticRegression(max_iter=1000, class_weight='balanced', random_state=42)
     model.fit(X_train, y_train)
-    print("✅ 分类器训练完毕 (基于第一问历史体系)")
+    print("[SUCCESS] 基线分类模型训练完成 (基于先验知识库)。")
 
-    # 2. 加载并转换新流入数据
+    # 2. 载入并处理新流入的泛化测试集
     df_new = load_new_datasets()
     if df_new.empty:
-        print("❌ 分类中止：新数据集为空。")
+        print("[ERROR] 分类流程中止：测试集为空。")
         return
         
-    print("\n🔮 第二阶段：处理新数据并计算概率分布...")
+    print("\n[PROCESS] 阶段二：新流入数据特征映射与后验概率分布计算...")
     X_new = vectorizer.transform(df_new['清洗后文本特征'])
     
-    # 获取预测概率矩阵
+    # 获取各类别的预测概率矩阵
     probs = model.predict_proba(X_new)
     
-    # 3. 核心机制：计算评价指标与异常捕捉
-    print("\n📐 第三阶段：计算综合量化评价指标与异常拦截...")
+    # 3. 计算量化评价指标与异常识别策略
+    print("\n[PROCESS] 阶段三：计算综合量化评价指标并执行异常样本拦截...")
     
     predictions = []
     confidences = []
@@ -198,18 +197,18 @@ def run_classification_pipeline():
         ent = entropy(prob_dist, base=2)
         entropies.append(ent)
         
-        # 异常拦截规则
+        # 异常样本识别与拦截阈值设定
         if top1_prob < 0.40:
             status_flags.append("无法明确归类 (低置信度)")
             predictions.append(-1)
         elif margin < 0.15:
-            status_flags.append(f"多类别特征 (倾向 {model.classes_[top1_class]} 和 {model.classes_[top2_class]})")
+            status_flags.append(f"多类别特征 (倾向类别 {model.classes_[top1_class]} 与 {model.classes_[top2_class]})")
             predictions.append(-1) 
         else:
             status_flags.append("自动归类成功")
             predictions.append(model.classes_[top1_class])
 
-    # 4. 组装并保存结果
+    # 4. 汇总分类结果与指标参数
     df_new['预测类别'] = predictions
     df_new['最大置信度'] = confidences
     df_new['类别混淆度'] = ambiguity_scores
@@ -217,34 +216,34 @@ def run_classification_pipeline():
     df_new['处理状态'] = status_flags
     
     df_new.drop(columns=['原始文本', '清洗后文本特征']).to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
-    print(f"\n💾 预测结果已保存至: {OUTPUT_FILE}")
+    print(f"\n[SUCCESS] 分类预测结果已成功导出至: {OUTPUT_FILE}")
     
-    # 5. 输出宏观评价报告
+    # 5. 生成系统宏观量化评价报告
     success_rate = (df_new['预测类别'] != -1).mean() * 100
     avg_entropy = np.mean(entropies)
     
     report = f"""
 ==================================================
-📊 问题二：分类系统综合量化评价报告
+[REPORT] 问题二：分类系统综合量化评价报告
 ==================================================
-【1. 迁移适用性评价】
-- 新数据总测试量: {len(df_new)} 份
+【1. 模型迁移与适用性评价】
+- 测试样本总数: {len(df_new)} 份
 - 模型有效识别率: {success_rate:.2f}%
-- 需人工复核率: {100 - success_rate:.2f}% 
+- 待人工复核率: {100 - success_rate:.2f}% 
 
 【2. 分类合理性与可解释性评价】
-- 全局平均信息熵 (H): {avg_entropy:.4f} (越低代表模型判定越果断)
+- 全局平均信息熵 (H): {avg_entropy:.4f} (值越低表明模型分类确定性越高)
 - 平均预测置信度: {np.mean(confidences):.4f}
 
-【3. 异常数据处理说明】
-模型共拦截了 {sum(df_new['预测类别'] == -1)} 份异常数据，已统一标记为 -1 (待复核)。
-这些数据将被移交至问题三的人工/规则复核流程。
+【3. 异常数据识别与处理机制说明】
+基于设定的边界阈值，模型共拦截了 {sum(df_new['预测类别'] == -1)} 份异常特征样本。
+上述样本已统一标记为 -1 类别，将被移交至问题三的规则复核流程作进一步判断。
 ==================================================
 """
     print(report)
     with open(METRICS_FILE, 'w', encoding='utf-8') as f:
         f.write(report)
-    print(f"📝 量化评价报告已保存至: {METRICS_FILE}")
+    print(f"[SUCCESS] 综合量化评价报告已保存至: {METRICS_FILE}")
 
 if __name__ == "__main__":
     run_classification_pipeline()
